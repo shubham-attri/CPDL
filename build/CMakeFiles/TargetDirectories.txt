@@ -1,0 +1,4 @@
+/Users/a3fckx/Desktop/Attri/CPDL/build/CMakeFiles/CPDL.dir
+/Users/a3fckx/Desktop/Attri/CPDL/build/CMakeFiles/test.dir
+/Users/a3fckx/Desktop/Attri/CPDL/build/CMakeFiles/edit_cache.dir
+/Users/a3fckx/Desktop/Attri/CPDL/build/CMakeFiles/rebuild_cache.dir
