@@ -23,7 +23,7 @@ private:
     double data; // value of the node
     mutable double grad = 0; // gradient of the node and initialised to 0 
     std::vector<std::shared_ptr<Value>> prev; // previous nodes
-    std::function<void()> backward_fn; // backward function
+    std::function<void(double)> backward_fn; // backward function
     static size_t node_count;  // For debugging: track number of nodes
     size_t node_id;           // For debugging: unique identifier for each node
     bool is_leaf;  // Flag to mark leaf nodes (no gradients needed)
@@ -49,10 +49,28 @@ public:
     Value(const Value& other) 
         : data(other.data), grad(0.0), is_leaf(other.is_leaf) {
         node_id = ++node_count;
-        // Deep copy the prev vector
-        for (const auto& p : other.prev) {
-            prev.push_back(std::make_shared<Value>(*p));
+        // Share the same children nodes
+        prev = other.prev;
+        backward_fn = other.backward_fn;
+    }
+
+    // Destructor to clean up memory
+    ~Value() {
+        prev.clear();
+    }
+    
+    // Assignment operator
+    Value& operator=(const Value& other) {
+        if (this != &other) {
+            prev.clear();
+            data = other.data;
+            grad = 0.0;
+            is_leaf = other.is_leaf;
+            node_id = ++node_count;
+            prev = other.prev;
+            backward_fn = other.backward_fn;
         }
+        return *this;
     }
 
     // Addition operator: Creates a new Value representing (this + other)
@@ -60,11 +78,47 @@ public:
     // @param other: The Value to add to this
     // @return: New Value containing the sum and gradient function
     Value operator+(const Value& other) const {
-        Value out(data + other.data, {std::make_shared<Value>(*this), std::make_shared<Value>(other)});
+        Value out(data + other.data);
         
-        out.backward_fn = [out_ptr = &out]() {
-            out_ptr->prev[0]->grad += out_ptr->grad;
-            out_ptr->prev[1]->grad += out_ptr->grad;
+        std::cout << "\nAddition operation:" << std::endl;
+        std::cout << "  Left operand: " << data << " (node " << node_id << ")" << std::endl;
+        std::cout << "  Right operand: " << other.data << " (node " << other.node_id << ")" << std::endl;
+        
+        // Create shared_ptr to the original nodes
+        auto this_shared = std::make_shared<Value>(data);
+        this_shared->grad = grad;
+        this_shared->prev = prev;
+        this_shared->node_id = node_id;
+        this_shared->is_leaf = is_leaf;
+        this_shared->backward_fn = backward_fn;
+        
+        auto other_shared = std::make_shared<Value>(other.data);
+        other_shared->grad = other.grad;
+        other_shared->prev = other.prev;
+        other_shared->node_id = other.node_id;
+        other_shared->is_leaf = other.is_leaf;
+        other_shared->backward_fn = other.backward_fn;
+        
+        out.prev = {this_shared, other_shared};
+        
+        out.backward_fn = [this_shared, other_shared](double out_grad) {
+            std::cout << "  Addition backward pass:" << std::endl;
+            std::cout << "    Before update - left: " << this_shared->grad 
+                      << ", right: " << other_shared->grad << std::endl;
+            
+            this_shared->grad += out_grad;
+            other_shared->grad += out_grad;
+            
+            // Propagate gradients to children
+            if (this_shared->backward_fn) {
+                this_shared->backward_fn(this_shared->grad);
+            }
+            if (other_shared->backward_fn) {
+                other_shared->backward_fn(other_shared->grad);
+            }
+            
+            std::cout << "    After update - left: " << this_shared->grad 
+                      << ", right: " << other_shared->grad << std::endl;
         };
         return out;
     }
@@ -74,40 +128,91 @@ public:
     // @param other: The Value to multiply with this
     // @return: New Value containing the product and gradient function
     Value operator*(const Value& other) const {
-        // Store pointers to original nodes
-        auto this_ptr = std::make_shared<Value>(data);  // Just store the value
-        auto other_ptr = std::make_shared<Value>(other.data);
-        this_ptr->grad = grad;  // Copy current gradients
-        other_ptr->grad = other.grad;
+        Value out(data * other.data);
         
-        Value out(data * other.data, {this_ptr, other_ptr});
+        std::cout << "\nMultiplication operation details:" << std::endl;
+        std::cout << "  Original nodes:" << std::endl;
+        std::cout << "    this: node_" << node_id << " (data=" << data 
+                  << ", grad=" << grad << ", leaf=" << is_leaf << ")" << std::endl;
+        std::cout << "    other: node_" << other.node_id << " (data=" << other.data 
+                  << ", grad=" << other.grad << ", leaf=" << other.is_leaf << ")" << std::endl;
         
-        double this_data = data;
-        double other_data = other.data;
+        auto this_shared = std::make_shared<Value>(data);
+        this_shared->grad = grad;
+        this_shared->prev = prev;
+        this_shared->node_id = node_id;
+        this_shared->is_leaf = is_leaf;
+        this_shared->backward_fn = backward_fn;
         
-        // Capture original nodes by reference to update their gradients
-        out.backward_fn = [this_ptr, other_ptr, this_data, other_data, 
-                          orig_this = this, orig_other = &other]() {
-            this_ptr->grad += other_data;
-            other_ptr->grad += this_data;
-            const_cast<Value*>(orig_this)->grad = this_ptr->grad;
-            const_cast<Value*>(orig_other)->grad = other_ptr->grad;
+        auto other_shared = std::make_shared<Value>(other.data);
+        other_shared->grad = other.grad;
+        other_shared->prev = other.prev;
+        other_shared->node_id = other.node_id;
+        other_shared->is_leaf = other.is_leaf;
+        other_shared->backward_fn = other.backward_fn;
+        
+        out.prev = {this_shared, other_shared};
+        
+        out.backward_fn = [this_shared, other_shared](double out_grad) {
+            std::cout << "  Backward pass for multiplication:" << std::endl;
+            std::cout << "    Left node " << this_shared->node_id << " before: grad=" << this_shared->grad << std::endl;
+            std::cout << "    Right node " << other_shared->node_id << " before: grad=" << other_shared->grad << std::endl;
+            
+            this_shared->grad += other_shared->data * out_grad;
+            other_shared->grad += this_shared->data * out_grad;
+            
+            // Propagate gradients to children
+            if (this_shared->backward_fn) {
+                this_shared->backward_fn(this_shared->grad);
+            }
+            if (other_shared->backward_fn) {
+                other_shared->backward_fn(other_shared->grad);
+            }
+            
+            std::cout << "    Left node after: grad=" << this_shared->grad << std::endl;
+            std::cout << "    Right node after: grad=" << other_shared->grad << std::endl;
         };
         return out;
     }
 
     void backward() {
-        if (!backward_fn) {
-            std::cout << "Warning: No backward function for node " << node_id << std::endl;
-            return;
+        if (grad == 0.0) {
+            grad = 1.0;
         }
         
-        try {
-            backward_fn();
-        } catch (const std::exception& e) {
-            std::cout << "Error in backward pass for node " << node_id << ": " << e.what() << std::endl;
-            throw;
+        std::cout << "\nBackward pass for node " << node_id << ":" << std::endl;
+        std::cout << "  Data: " << data << std::endl;
+        std::cout << "  Gradient before: " << grad << std::endl;
+        std::cout << "  Number of children: " << prev.size() << std::endl;
+        std::cout << "  Node type: " << (is_leaf ? "Leaf" : "Internal") << std::endl;
+        
+        std::cout << "  Children data:";
+        for (const auto& child : prev) {
+            std::cout << "\n    Node " << child->node_id 
+                      << ": data=" << child->getData() 
+                      << ", grad=" << child->getGrad();
         }
+        std::cout << std::endl;
+        
+        if (backward_fn) {
+            std::cout << "  Executing backward function" << std::endl;
+            backward_fn(grad);
+            std::cout << "  Backward function complete" << std::endl;
+        } else {
+            std::cout << "  No backward function defined" << std::endl;
+        }
+        
+        std::cout << "  Gradient after backward_fn: " << grad << std::endl;
+        
+        for (auto it = prev.rbegin(); it != prev.rend(); ++it) {
+            std::cout << "  Propagating to child node " << (*it)->node_id 
+                      << " (data=" << (*it)->getData() 
+                      << ", current_grad=" << (*it)->getGrad() << ")" << std::endl;
+            if (*it) {
+                (*it)->backward();
+            }
+        }
+        std::cout << "  Backward pass complete for node " << node_id << std::endl;
     }
 
     // Returns the data value stored in this Value object
@@ -121,17 +226,34 @@ public:
     // Applies the hyperbolic tangent (tanh) activation function to this Value
     // @return: A new Value containing tanh(data) and gradient computation
     Value tanh() const {
-        // Compute tanh of the input data
         double t = std::tanh(data);
+        std::cout << "\nTanh operation:" << std::endl;
+        std::cout << "  Input node: " << getDebugString() << std::endl;
+        std::cout << "  Tanh value: " << t << std::endl;
         
-        // Create new Value node with the tanh result
-        Value out(t, {std::make_shared<Value>(*this)});
+        auto this_shared = std::make_shared<Value>(*this);
+        this_shared->grad = grad;
+        this_shared->prev = prev;
+        this_shared->node_id = node_id;
+        this_shared->is_leaf = is_leaf;
+        this_shared->backward_fn = backward_fn;
         
-        // Set up gradient computation for backpropagation
-        out.backward_fn = [t, this, out_ptr = &out]() {
-            // Update gradient using chain rule:
-            // ∂out/∂x = (1 - tanh²(x)) * ∂L/∂out 
-            grad += (1 - t * t) * out_ptr->grad;
+        Value out(t, {this_shared});
+        
+        std::cout << "  Created output node: " << out.getDebugString() << std::endl;
+        std::cout << "  Output children: " << out.getPrev().size() << std::endl;
+        std::cout << "  Child node: " << this_shared->getDebugString() << std::endl;
+        
+        out.backward_fn = [t, this_ptr = out.prev[0]](double out_grad) {
+            std::cout << "  Tanh backward pass:" << std::endl;
+            std::cout << "    Input grad before: " << this_ptr->grad << std::endl;
+            std::cout << "    Derivative: " << (1 - t * t) << std::endl;
+            std::cout << "    Incoming gradient: " << out_grad << std::endl;
+            this_ptr->grad += (1 - t * t) * out_grad;
+            if (this_ptr->backward_fn) {
+                this_ptr->backward_fn(this_ptr->grad);
+            }
+            std::cout << "    Input grad after: " << this_ptr->grad << std::endl;
         };
         return out;
     }
@@ -168,6 +290,8 @@ namespace Loss {
     // @param targets: Vector of target/ground truth values to compare against
     // @return: A Value object containing the MSE loss value
     inline Value mse(const std::vector<Value>& predictions, const std::vector<Value>& targets) {
+        std::cout << "\n=== Starting MSE Computation ===" << std::endl;
+        std::cout << "Number of predictions: " << predictions.size() << std::endl;
         assert(predictions.size() == targets.size());
         
         // Step 1: Collection of terms
@@ -176,31 +300,58 @@ namespace Loss {
         
         // Step 2: Computing squared differences
         for (size_t i = 0; i < predictions.size(); i++) {
+            std::cout << "\nMSE computation for index " << i << ":" << std::endl;
+            std::cout << "  Prediction node: " << predictions[i].getDebugString() << std::endl;
+            std::cout << "  Target value: " << targets[i].getData() << std::endl;
+            
             double target_val = targets[i].getData();
             Value diff = predictions[i] + Value(-target_val, {});
+            std::cout << "  Created difference node: " << diff.getDebugString() << std::endl;
+            std::cout << "  Difference children: " << diff.getPrev().size() << std::endl;
+            
             Value squared = diff * diff;
+            std::cout << "  Created squared node: " << squared.getDebugString() << std::endl;
+            std::cout << "  Squared children: " << squared.getPrev().size() << std::endl;
+            
             terms.push_back(squared);
         }
         
         // Step 3: Binary tree reduction
         while (terms.size() > 1) {
+            std::cout << "\nBinary reduction step:" << std::endl;
+            std::cout << "  Terms before reduction:" << std::endl;
+            for (size_t i = 0; i < terms.size(); i++) {
+                std::cout << "    Term " << i << ": " << terms[i].getDebugString() << std::endl;
+            }
+            
             std::vector<Value> next_level;
             for (size_t i = 0; i < terms.size(); i += 2) {
                 if (i + 1 < terms.size()) {
                     Value sum = terms[i] + terms[i + 1];
+                    std::cout << "  Created sum node: " << sum.getDebugString() << std::endl;
+                    std::cout << "  Sum children: " << sum.getPrev().size() << std::endl;
                     next_level.push_back(sum);
                 } else {
                     next_level.push_back(terms[i]);
                 }
             }
             terms = std::move(next_level);
+            std::cout << "  Terms after reduction: " << terms.size() << std::endl;
         }
         
         // Step 4: Final scaling
+        std::cout << "\nFinal scaling step:" << std::endl;
+        std::cout << "  Final term node: " << terms[0].getDebugString() << std::endl;
+        std::cout << "  Final term children: " << terms[0].getPrev().size() << std::endl;
+        
         Value scale(1.0 / predictions.size());
         Value final_loss = terms[0] * scale;
         
-        std::cout << "Loss: " << final_loss.getData() << std::endl;
+        std::cout << "\n=== MSE Computation Complete ===" << std::endl;
+        std::cout << "Final loss node: " << final_loss.getDebugString() << std::endl;
+        std::cout << "Loss children: " << final_loss.getPrev().size() << std::endl;
+        std::cout << "Computation graph depth: " << std::endl;
+        final_loss.printGraph("  ");
         
         return final_loss;
     }
@@ -232,27 +383,21 @@ public:
     // @param inputs: Vector of input values to process
     // @return: The output Value after applying weights, bias, and activation function
     Value feedForward(const std::vector<Value>& inputs) {
-        std::cout << "\nFeedforward Debug:" << std::endl;
-        std::vector<Value> current_inputs = inputs;
-        
-        Value act(0.0);  // Declare the accumulator variable!
-        
+        Value act(0.0);
         for (size_t i = 0; i < weights.size(); i++) {
-            std::cout << "Processing weight " << i << ":" << std::endl;
-            std::cout << "  Input: " << current_inputs[i].getDebugString() << std::endl;
-            std::cout << "  Weight: " << weights[i].getDebugString() << std::endl;
-            
-            Value product = weights[i] * current_inputs[i];
-            std::cout << "  Product: " << product.getDebugString() << std::endl;
-            
+            std::cout << "\nNeuron computation step " << i << ":" << std::endl;
+            std::cout << "  Input: " << inputs[i].getData() 
+                      << " * Weight: " << weights[i].getData() << std::endl;
+            Value product = weights[i] * inputs[i];
+            std::cout << "  Product result: " << product.getData() << std::endl;
+            std::cout << "  Accumulated before: " << act.getData() << std::endl;
             if (i == 0) {
                 act = product;
             } else {
                 act = act + product;
             }
-            std::cout << "  Accumulated: " << act.getDebugString() << std::endl;
+            std::cout << "  Accumulated after: " << act.getData() << std::endl;
         }
-        
         act = (act + bias).tanh();
         std::cout << "Final output: " << act.getDebugString() << std::endl;
         return act;
@@ -303,8 +448,12 @@ public:
     // @return: Vector of output values, one from each neuron
     std::vector<Value> feedForward(const std::vector<Value>& inputs) {
         std::vector<Value> outputs;
-        for (auto& neuron : neurons) {
-            outputs.push_back(neuron.feedForward(inputs));
+        std::cout << "\nLayer forward pass:" << std::endl;
+        for (size_t i = 0; i < neurons.size(); i++) {
+            std::cout << "  Neuron " << i << " computation:" << std::endl;
+            auto out = neurons[i].feedForward(inputs);
+            std::cout << "  Output: " << out.getData() << std::endl;
+            outputs.push_back(out);
         }
         return outputs;
     }
