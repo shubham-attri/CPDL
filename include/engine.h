@@ -22,28 +22,49 @@ class Value {
 private:
     double data; // value of the node
     mutable double grad = 0; // gradient of the node and initialised to 0 
-    std::vector<Value*> prev; // previous nodes
+    std::vector<std::shared_ptr<Value>> prev; // previous nodes
     std::function<void()> backward_fn; // backward function
+    static size_t node_count;  // For debugging: track number of nodes
+    size_t node_id;           // For debugging: unique identifier for each node
+    bool is_leaf;  // Flag to mark leaf nodes (no gradients needed)
 
 public:
     // Constructor: Creates a Value node with given data and optional children nodes
     // @param data: The numerical value to store
     // @param children: Vector of pointers to child nodes in computation graph (default empty)
-    explicit Value(double data, std::vector<Value*> children = {}) 
-        : data(data), grad(0.0), prev(children) {}
+    explicit Value(double data, std::vector<std::shared_ptr<Value>> children = {}) 
+        : data(data), grad(0.0), prev(children), 
+         is_leaf(children.empty()) {
+        node_id = ++node_count;
+        
+        // Validate all child pointers
+        for (size_t i = 0; i < children.size(); i++) {
+            if (!children[i]) {
+                throw std::runtime_error("Null child pointer in Value constructor");
+            }
+        }
+    }
+
+    // Copy constructor to ensure proper node ownership
+    Value(const Value& other) 
+        : data(other.data), grad(0.0), is_leaf(other.is_leaf) {
+        node_id = ++node_count;
+        // Deep copy the prev vector
+        for (const auto& p : other.prev) {
+            prev.push_back(std::make_shared<Value>(*p));
+        }
+    }
 
     // Addition operator: Creates a new Value representing (this + other)
     // Sets up gradient computation for backpropagation
     // @param other: The Value to add to this
     // @return: New Value containing the sum and gradient function
     Value operator+(const Value& other) const {
-        // Forward pass: just add the values
-        Value out(data + other.data, {const_cast<Value*>(this), const_cast<Value*>(&other)});
+        Value out(data + other.data, {std::make_shared<Value>(*this), std::make_shared<Value>(other)});
         
-        // Backward pass: define how gradients flow
-        out.backward_fn = [this, &other, out_ptr = &out]() {
-            grad += out_ptr->grad;
-            other.grad += out_ptr->grad;
+        out.backward_fn = [out_ptr = &out]() {
+            out_ptr->prev[0]->grad += out_ptr->grad;
+            out_ptr->prev[1]->grad += out_ptr->grad;
         };
         return out;
     }
@@ -53,46 +74,39 @@ public:
     // @param other: The Value to multiply with this
     // @return: New Value containing the product and gradient function
     Value operator*(const Value& other) const {
-        // Forward pass: just multiply the values
-        Value out(data * other.data, {const_cast<Value*>(this), const_cast<Value*>(&other)});
-
-        // Backward pass: define how gradients flow
+        // Store pointers to original nodes
+        auto this_ptr = std::make_shared<Value>(data);  // Just store the value
+        auto other_ptr = std::make_shared<Value>(other.data);
+        this_ptr->grad = grad;  // Copy current gradients
+        other_ptr->grad = other.grad;
+        
+        Value out(data * other.data, {this_ptr, other_ptr});
+        
         double this_data = data;
         double other_data = other.data;
-        out.backward_fn = [this, &other, this_data, other_data, out_ptr = &out]() {
-            grad += other_data * out_ptr->grad;
-            other.grad += this_data * out_ptr->grad;
+        
+        // Capture original nodes by reference to update their gradients
+        out.backward_fn = [this_ptr, other_ptr, this_data, other_data, 
+                          orig_this = this, orig_other = &other]() {
+            this_ptr->grad += other_data;
+            other_ptr->grad += this_data;
+            const_cast<Value*>(orig_this)->grad = this_ptr->grad;
+            const_cast<Value*>(orig_other)->grad = other_ptr->grad;
         };
         return out;
     }
 
     void backward() {
-        // These will store our computation graph in topologically sorted order
-        std::vector<Value*> topo;
-        std::set<Value*> visited;
+        if (!backward_fn) {
+            std::cout << "Warning: No backward function for node " << node_id << std::endl;
+            return;
+        }
         
-        // Define a recursive function to build the topological sort
-        std::function<void(Value*)> build_topo = [&](Value* v) {
-            if (!v || visited.find(v) != visited.end()) {
-                return;  // Skip null pointers and already visited nodes
-            }
-            visited.insert(v);                           // Mark as visited
-            for (Value* child : v->prev) {              // Visit all children first
-                if (child) {                            // Check for null pointers
-                    build_topo(child);
-                }
-            }
-            topo.push_back(v);                          // Add node after its children
-        };
-        
-        build_topo(this);           // Start building from current node
-        grad = 1.0;                 // Set gradient of output node to 1.0
-        
-        // Traverse nodes in reverse order to compute gradients
-        for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
-            if (*it && (*it)->backward_fn) {            // Check for null pointers
-                (*it)->backward_fn();    // Apply chain rule via stored backward function
-            }
+        try {
+            backward_fn();
+        } catch (const std::exception& e) {
+            std::cout << "Error in backward pass for node " << node_id << ": " << e.what() << std::endl;
+            throw;
         }
     }
 
@@ -102,6 +116,7 @@ public:
     double getGrad() const { return grad; }
     // Sets the gradient value to the specified value
     void setGrad(double g) { grad = g; }
+    const std::vector<std::shared_ptr<Value>>& getPrev() const { return prev; }
 
     // Applies the hyperbolic tangent (tanh) activation function to this Value
     // @return: A new Value containing tanh(data) and gradient computation
@@ -110,7 +125,7 @@ public:
         double t = std::tanh(data);
         
         // Create new Value node with the tanh result
-        Value out(t, {const_cast<Value*>(this)});
+        Value out(t, {std::make_shared<Value>(*this)});
         
         // Set up gradient computation for backpropagation
         out.backward_fn = [t, this, out_ptr = &out]() {
@@ -120,7 +135,30 @@ public:
         };
         return out;
     }
+
+    // Add method to get node info for debugging
+    std::string getDebugString() const {
+        return "Node_" + std::to_string(node_id) + 
+               "(data=" + std::to_string(data) + 
+               ", grad=" + std::to_string(grad) + 
+               ", prev_count=" + std::to_string(prev.size()) + ")";
+    }
+
+    // Debug method to print computation graph
+    void printGraph(std::string prefix = "") const {
+        std::cout << prefix << getDebugString() << std::endl;
+        for (const auto& child : prev) {
+            if (child) {
+                child->printGraph(prefix + "  ");
+            } else {
+                std::cout << prefix + "  NULL CHILD" << std::endl;
+            }
+        }
+    }
 };
+
+// Initialize static member
+size_t Value::node_count = 0;
 
 // Loss functions namespace
 namespace Loss {
@@ -130,33 +168,41 @@ namespace Loss {
     // @param targets: Vector of target/ground truth values to compare against
     // @return: A Value object containing the MSE loss value
     inline Value mse(const std::vector<Value>& predictions, const std::vector<Value>& targets) {
-        // Verify predictions and targets have same size
         assert(predictions.size() == targets.size());
-        // Log start of MSE computation
-        std::cout << "Computing MSE loss for " << predictions.size() << " values" << std::endl;
         
-        Value loss(0.0);
-        try {
-            for (size_t i = 0; i < predictions.size(); i++) {
-                // Use the prediction directly (it's already in the computation graph)
-                const Value& pred = predictions[i];
-                // Create a constant Value for the target (no gradient needed)
-                Value diff = pred + Value(-targets[i].getData());  // Convert target to scalar
-                Value squared = diff * diff;
-                loss = loss + squared;
-                
-                std::cout << "  pred: " << pred.getData() 
-                         << ", target: " << targets[i].getData() 
-                         << ", diff: " << diff.getData() 
-                         << ", squared: " << squared.getData() << std::endl;
-            }
-            loss = loss * Value(1.0 / predictions.size());
-            std::cout << "Final MSE loss: " << loss.getData() << std::endl;
-            return loss;
-        } catch (const std::exception& e) {
-            std::cout << "Error computing MSE loss: " << e.what() << std::endl;
-            throw;
+        // Step 1: Collection of terms
+        std::vector<Value> terms;
+        terms.reserve(predictions.size());
+        
+        // Step 2: Computing squared differences
+        for (size_t i = 0; i < predictions.size(); i++) {
+            double target_val = targets[i].getData();
+            Value diff = predictions[i] + Value(-target_val, {});
+            Value squared = diff * diff;
+            terms.push_back(squared);
         }
+        
+        // Step 3: Binary tree reduction
+        while (terms.size() > 1) {
+            std::vector<Value> next_level;
+            for (size_t i = 0; i < terms.size(); i += 2) {
+                if (i + 1 < terms.size()) {
+                    Value sum = terms[i] + terms[i + 1];
+                    next_level.push_back(sum);
+                } else {
+                    next_level.push_back(terms[i]);
+                }
+            }
+            terms = std::move(next_level);
+        }
+        
+        // Step 4: Final scaling
+        Value scale(1.0 / predictions.size());
+        Value final_loss = terms[0] * scale;
+        
+        std::cout << "Loss: " << final_loss.getData() << std::endl;
+        
+        return final_loss;
     }
 }
 
@@ -186,26 +232,30 @@ public:
     // @param inputs: Vector of input values to process
     // @return: The output Value after applying weights, bias, and activation function
     Value feedForward(const std::vector<Value>& inputs) {
-        // Validate input size matches number of weights
-        if (inputs.size() != weights.size()) {
-            throw std::invalid_argument("Number of inputs must match number of weights");
-        }
-
-        // Use std::transform and std::accumulate for cleaner weighted sum computation
-        Value act = std::accumulate(
-            inputs.begin(), inputs.end(),  // Input range
-            Value(0.0),                    // Initial value
-            [this, i = 0](Value& sum, const Value& input) mutable {
-                return sum + (weights[i++] * input);
+        std::cout << "\nFeedforward Debug:" << std::endl;
+        std::vector<Value> current_inputs = inputs;
+        
+        Value act(0.0);  // Declare the accumulator variable!
+        
+        for (size_t i = 0; i < weights.size(); i++) {
+            std::cout << "Processing weight " << i << ":" << std::endl;
+            std::cout << "  Input: " << current_inputs[i].getDebugString() << std::endl;
+            std::cout << "  Weight: " << weights[i].getDebugString() << std::endl;
+            
+            Value product = weights[i] * current_inputs[i];
+            std::cout << "  Product: " << product.getDebugString() << std::endl;
+            
+            if (i == 0) {
+                act = product;
+            } else {
+                act = act + product;
             }
-        );
+            std::cout << "  Accumulated: " << act.getDebugString() << std::endl;
+        }
         
-        // Add bias and apply activation function
         act = (act + bias).tanh();
-        
-        // Store and return result
-        output = act;
-        return output;
+        std::cout << "Final output: " << act.getDebugString() << std::endl;
+        return act;
     }
 
     void zero_grad() {
@@ -223,6 +273,10 @@ public:
     }
 
     // Getter methods for accessing neuron's internal state
+    const std::vector<Value>& getWeights() const { return weights; }
+    const Value& getBias() const { return bias; }
+    const Value& getOutput() const { return output; }
+    // Non-const versions for when we need to modify
     std::vector<Value>& getWeights() { return weights; }
     Value& getBias() { return bias; }
     Value& getOutput() { return output; }
@@ -273,6 +327,7 @@ public:
     }
 
     // Getter for accessing the layer's neurons
+    const std::vector<Neuron>& getNeurons() const { return neurons; }
     std::vector<Neuron>& getNeurons() { return neurons; }
 };
 
@@ -309,67 +364,91 @@ public:
                const std::vector<std::vector<Value>>& y_train,
                size_t epochs,
                double learning_rate) {
-        std::cout << "Starting epoch loop..." << std::endl;
+        std::cout << "\n=== Starting Training ===" << std::endl;
+        
         for (size_t epoch = 0; epoch < epochs; ++epoch) {
-            std::cout << "Epoch " << epoch << " started" << std::endl;
-            Value total_loss(0.0);
+            Value epoch_loss(0.0);
+            std::cout << "\nEpoch " << epoch + 1 << "/" << epochs << std::endl;
             
-            std::cout << "Processing " << X_train.size() << " samples" << std::endl;
             for (size_t i = 0; i < X_train.size(); ++i) {
-                // Forward pass
-                std::cout << "Sample " << i << ": Forward pass" << std::endl;
+                std::cout << "\n--- Sample " << i + 1 << "/" << X_train.size() << " ---" << std::endl;
+                
+                // Debug forward pass
+                std::cout << "1. Starting forward pass..." << std::endl;
                 auto predictions = feedForward(X_train[i]);
-                
-                // Debug predictions
-                std::cout << "Predictions: ";
-                for (const auto& p : predictions) {
-                    std::cout << p.getData() << " ";
-                }
-                std::cout << "\nTargets: ";
-                for (const auto& t : y_train[i]) {
-                    std::cout << t.getData() << " ";
-                }
-                std::cout << std::endl;
-                
-                // Compute loss
-                std::cout << "Sample " << i << ": Computing loss" << std::endl;
-                auto loss = Loss::mse(predictions, y_train[i]);
-                std::cout << "Loss value: " << loss.getData() << std::endl;
-                
-                // Zero gradients before backward pass
-                std::cout << "Sample " << i << ": Zeroing gradients" << std::endl;
-                for (auto& layer : layers) {
-                    layer.zero_grad();
+                std::cout << "   Predictions size: " << predictions.size() << std::endl;
+                for (size_t p = 0; p < predictions.size(); p++) {
+                    std::cout << "   Prediction " << p << ": " << predictions[p].getData() << std::endl;
                 }
                 
-                // Backward pass
-                std::cout << "Sample " << i << ": Starting backward pass" << std::endl;
-                loss.setGrad(1.0);
-                std::cout << "Loss gradient: " << loss.getGrad() << std::endl;
-                try {
-                    loss.backward();
-                } catch (const std::exception& e) {
-                    std::cout << "Error during backward pass: " << e.what() << std::endl;
-                    throw;
+                // Debug loss computation
+                std::cout << "2. Computing loss..." << std::endl;
+                std::cout << "   Target size: " << y_train[i].size() << std::endl;
+                Value loss = Loss::mse(predictions, y_train[i]);
+                std::cout << "   Loss computed: " << loss.getData() << std::endl;
+                
+                // Debug gradient initialization
+                std::cout << "3. Initializing gradients..." << std::endl;
+                std::cout << "   Number of layers: " << layers.size() << std::endl;
+                for (size_t l = 0; l < layers.size(); l++) {
+                    std::cout << "   Layer " << l << " neurons: " << layers[l].getNeurons().size() << std::endl;
+                    layers[l].zero_grad();
                 }
                 
-                // Update parameters
-                std::cout << "Sample " << i << ": Updating parameters" << std::endl;
-                try {
-                    for (auto& layer : layers) {
-                        layer.update_parameters(learning_rate);
+                // Debug backward pass
+                std::cout << "4. Starting backward pass..." << std::endl;
+                loss.backward();
+                std::cout << "   Backward pass complete" << std::endl;
+                
+                // Debug gradient state after backward pass
+                std::cout << "5. Checking gradients after backward pass..." << std::endl;
+                for (size_t l = 0; l < layers.size(); l++) {
+                    auto& layer = layers[l];
+                    std::cout << "   Layer " << l << ":" << std::endl;
+                    for (size_t n = 0; n < layer.getNeurons().size(); n++) {
+                        auto& neuron = layer.getNeurons()[n];
+                        std::cout << "     Neuron " << n << " gradients:" << std::endl;
+                        
+                        // Debug weights
+                        const auto& weights = neuron.getWeights();
+                        std::cout << "       Weights (" << weights.size() << "): ";
+                        for (const auto& w : weights) {
+                            std::cout << w.getGrad() << " ";
+                        }
+                        std::cout << std::endl;
+                        
+                        // Debug bias
+                        std::cout << "       Bias grad: " << neuron.getBias().getGrad() << std::endl;
                     }
+                }
+                
+                // Debug parameter updates
+                std::cout << "6. Starting parameter updates..." << std::endl;
+                try {
+                    for (size_t l = 0; l < layers.size(); l++) {
+                        std::cout << "   Updating Layer " << l << std::endl;
+                        auto& layer = layers[l];
+                        for (size_t n = 0; n < layer.getNeurons().size(); n++) {
+                            std::cout << "     Updating Neuron " << n << std::endl;
+                            auto& neuron = layer.getNeurons()[n];
+                            neuron.update_parameters(learning_rate);
+                        }
+                    }
+                    std::cout << "   Parameter updates complete" << std::endl;
                 } catch (const std::exception& e) {
-                    std::cout << "Error during parameter update: " << e.what() << std::endl;
+                    std::cout << "EXCEPTION during parameter update: " << e.what() << std::endl;
+                    throw;
+                } catch (...) {
+                    std::cout << "UNKNOWN EXCEPTION during parameter update!" << std::endl;
                     throw;
                 }
                 
-                total_loss = total_loss + loss;
+                epoch_loss = epoch_loss + loss;
             }
             
-            // Print epoch statistics
-            double avg_loss = total_loss.getData() / X_train.size();
-            std::cout << "Epoch " << epoch << " completed. Average loss: " << avg_loss << std::endl;
+            std::cout << "\nEpoch " << epoch + 1 << " complete. "
+                      << "Average loss: " << epoch_loss.getData() / X_train.size() 
+                      << std::endl;
         }
     }
 };
