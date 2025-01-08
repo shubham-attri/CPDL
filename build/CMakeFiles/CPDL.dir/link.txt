@@ -1,1 +1,1 @@
-/Library/Developer/CommandLineTools/usr/bin/c++  -stdlib=libc++ -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk -Wl,-search_paths_first -Wl,-headerpad_max_install_names  -stdlib=libc++ CMakeFiles/CPDL.dir/src/engine.cpp.o -o CPDL
+/Library/Developer/CommandLineTools/usr/bin/c++  -stdlib=libc++ -fsanitize=address -fno-omit-frame-pointer -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk -Wl,-search_paths_first -Wl,-headerpad_max_install_names  -stdlib=libc++ -fsanitize=address CMakeFiles/CPDL.dir/src/engine.cpp.o -o CPDL

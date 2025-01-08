@@ -222,8 +222,11 @@ CPDL_IS_TOP_LEVEL:STATIC=ON
 //Value Computed by CMake
 CPDL_SOURCE_DIR:STATIC=/Users/a3fckx/Desktop/Attri/CPDL
 
+//No help, variable specified on the command line.
+DEBUG:UNINITIALIZED=ON
+
 //Enable debug mode with additional visualization
-DEBUG_MODE:BOOL=ON
+DEBUG_MODE:BOOL=OFF
 
 
 ########################

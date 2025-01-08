@@ -5,31 +5,36 @@
 #include <set>
 #include <cmath>
 #include <iostream>
+#include <memory>
+#include <algorithm>
+#include <functional>
+#include <numeric>
 
 namespace NeuralNetwork {
 
 class Value {
 private:
-    double data;
-    double grad = 0;
-    std::vector<Value*> _prev;  // Children in computation graph
+    // double data;  // Forward value
+    // double grad=0;  // Gradient value 
+    std::vector<std::shared_ptr<Value>> _prev;  // Change to shared_ptr to manage lifetime
     #ifdef DEBUG_MODE
-    char op = 'n'; // for debugging and visualising the computation graph
+    char op = 'n';  // Operation type for debugging ('n' for none/input)
     #endif
-    std::function<void()> _backward;  // Changed to void() like micrograd
-
-    // Helper function for topological sort
+    std::function<void()> _backward;  // Gradient computation function
+    
     void build_topo(std::vector<Value*>& topo, std::set<Value*>& visited) noexcept {
         if (visited.find(this) == visited.end()) {
             visited.insert(this);
-            for (Value* child : _prev) { // for each child, build the topo
+            for (const auto& child : _prev) {
                 child->build_topo(topo, visited);
             }
-            topo.push_back(this); // add this node to the topo
+            topo.push_back(this);
         }
     }
 
 public:
+    double data;  // Forward value
+    double grad=0;  // Gradient value 
     // Constructor that creates a Value with given data and empty backward function
     // noexcept indicates this constructor won't throw exceptions
     explicit Value(double data) noexcept 
@@ -65,30 +70,34 @@ public:
     // For example, if a=b in a*b or a+b, we need to accumulate gradients from both paths
     Value operator+(const Value& other) const {
         Value out(data + other.data);
-        out._prev = {const_cast<Value*>(this), const_cast<Value*>(&other)};
+        out._prev = {std::make_shared<Value>(*this), std::make_shared<Value>(other)};
         
         #ifdef DEBUG_MODE
         out.op = '+';
         #endif
         
-        out._backward = [&out, a=const_cast<Value*>(this), 
-                        b=const_cast<Value*>(&other)]() {
-            a->grad += out.grad;
-            b->grad += out.grad;
+        // For addition, gradient flows directly: ∂out/∂x = 1
+        out._backward = [prev = out._prev]() {
+            prev[0]->grad += 1.0;  // Each input gets gradient of 1.0 times upstream gradient
+            prev[1]->grad += 1.0;
         };
         return out;
     }
 
     Value operator*(const Value& other) const {
         Value out(data * other.data);
-        out._prev = {const_cast<Value*>(this), const_cast<Value*>(&other)};
-        out.op = '*'; // for debugging and visualising the computation graph
-
+        out._prev = {std::make_shared<Value>(*this), std::make_shared<Value>(other)};
         
-        out._backward = [&out, a=const_cast<Value*>(this), 
-                        b=const_cast<Value*>(&other)]() {
-            a->grad += b->data * out.grad;  // ∂(a*b)/∂a = b
-            b->grad += a->data * out.grad;  // ∂(a*b)/∂b = a
+        #ifdef DEBUG_MODE
+        out.op = '*';
+        #endif
+        
+        // For multiplication: ∂out/∂a = b, ∂out/∂b = a
+        double a_data = data;
+        double b_data = other.data;
+        out._backward = [prev = out._prev, a_data, b_data]() {
+            prev[0]->grad += b_data;  // First input gets other's value times upstream gradient
+            prev[1]->grad += a_data;  // Second input gets first's value times upstream gradient
         };
         return out;
     }
@@ -96,11 +105,15 @@ public:
     Value tanh() const {
         double t = std::tanh(data);
         Value out(t);
-        out._prev = {const_cast<Value*>(this)};
-        out.op = 't';
+        out._prev = {std::make_shared<Value>(*this)};
         
-        out._backward = [&out, a=const_cast<Value*>(this), t]() {
-            a->grad += (1 - t*t) * out.grad;  // ∂tanh(x)/∂x = 1 - tanh²(x)
+        #ifdef DEBUG_MODE
+        out.op = 't';
+        #endif
+        
+        // For tanh: ∂out/∂x = 1 - tanh²(x)
+        out._backward = [prev = out._prev, t]() {
+            prev[0]->grad += (1 - t*t);  // Derivative of tanh times upstream gradient
         };
         return out;
     }
@@ -178,20 +191,20 @@ public:
     #ifdef DEBUG_MODE
     char getOp() const { return op; }
     #endif
-    const std::vector<Value*>& getPrev() const { return _prev; }
+    const std::vector<std::shared_ptr<Value>>& getPrev() const { return _prev; }
 
     void backward() {
-        // Build topological order
+        // 1. Build topological order of computation graph
         std::vector<Value*> topo;
         std::set<Value*> visited;
         build_topo(topo, visited);
         
-        // Initialize output gradient
+        // 2. Initialize output gradient to 1.0
         grad = 1.0;
         
-        // Backpropagate in reverse order
+        // 3. Backpropagate through nodes in reverse topological order
         for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
-            (*it)->_backward();  // Call backward function for each node
+            (*it)->_backward();
         }
     }
 
@@ -248,17 +261,24 @@ public:
             throw std::invalid_argument("Input size must match number of weights");
         }
         
-        // Compute weighted sum of inputs
-        Value act = w[0] * x[0];
+        std::cout << "Computing weighted sum..." << std::endl;
         
-        // Add remaining weight * input products
+        // Create the first product properly
+        Value mul = w[0] * x[0];
+        Value act = mul;  // Keep the multiplication result alive
+        
+        // Add remaining products
         for (size_t i = 1; i < w.size(); i++) {
-            act = act + w[i] * x[i];
+            std::cout << "Adding product " << i << ": " << w[i].getData() << " * " << x[i].getData() << std::endl;
+            Value mul_i = w[i] * x[i];  // Store intermediate multiplication
+            act = act + mul_i;          // Store intermediate addition
         }
         
-        // Add bias term and apply tanh activation
-        act = act + b;
-        return act.tanh();
+        std::cout << "Adding bias: " << b.getData() << std::endl;
+        Value with_bias = act + b;  // Store bias addition
+        
+        std::cout << "Applying tanh activation..." << std::endl;
+        return with_bias.tanh();  // Final activation
     }
 
     // Getters for weights and bias
@@ -266,5 +286,132 @@ public:
     const Value& getBias() const { return b; }
 };
 
+class Layer {
+private:
+    std::vector<Neuron> neurons;
+    size_t n_inputs;  // Number of inputs per neuron
+
+public:
+    // Constructor takes number of inputs per neuron and number of neurons
+    Layer(size_t nin, size_t nout) : n_inputs(nin) {
+        // Create nout neurons, each taking nin inputs
+        for (size_t i = 0; i < nout; i++) {
+            neurons.emplace_back(nin);
+        }
+    }
+
+    // Feed forward through all neurons
+    std::vector<Value> feedForward(const std::vector<Value>& inputs) {
+        if (inputs.size() != n_inputs) {
+            throw std::invalid_argument("Input size must match number of inputs per neuron");
+        }
+
+        std::vector<Value> outputs;
+        outputs.reserve(neurons.size());
+
+        // Feed input through each neuron
+        for (auto& neuron : neurons) {
+            outputs.push_back(neuron.feedForward(inputs));
+        }
+
+        return outputs;
+    }
+
+    // Convenience method for numeric inputs
+    template<typename T>
+    std::vector<Value> feedForward(const std::vector<T>& x) {
+        std::vector<Value> inputs;
+        inputs.reserve(x.size());
+        for (const auto& val : x) {
+            inputs.emplace_back(static_cast<double>(val));
+        }
+        return feedForward(inputs);
+    }
+
+    // Getters
+    const std::vector<Neuron>& getNeurons() const { return neurons; }
+    size_t getInputSize() const { return n_inputs; }
+    size_t getOutputSize() const { return neurons.size(); }
+
+    // Get all parameters (weights and biases) for optimization
+    std::vector<std::reference_wrapper<Value>> getParameters() {
+        std::vector<std::reference_wrapper<Value>> params;
+        for (auto& neuron : neurons) {
+            // Add weights
+            for (auto& w : const_cast<std::vector<Value>&>(neuron.getWeights())) {
+                params.push_back(std::ref(w));
+            }
+            // Add bias
+            params.push_back(std::ref(const_cast<Value&>(neuron.getBias())));
+        }
+        return params;
+    }
+};
+
+class MLP {
+private:
+    std::vector<Layer> layers;
+
+public:
+    // Constructor takes a vector of sizes (e.g., {2,3,1} = 2 inputs -> 3 hidden -> 1 output)
+    MLP(const std::vector<size_t>& layer_sizes) {
+        // Create layers based on sizes
+        for (size_t i = 0; i < layer_sizes.size() - 1; i++) {
+            layers.emplace_back(layer_sizes[i], layer_sizes[i + 1]);
+        }
+    }
+
+    // Forward pass through all layers
+    std::vector<Value> feedForward(const std::vector<Value>& inputs) {
+        std::vector<Value> current = inputs;
+        
+        // Pass through each layer
+        for (auto& layer : layers) {
+            current = layer.feedForward(current);
+        }
+        
+        return current;
+    }
+
+    // Convenience method for numeric inputs
+    template<typename T>
+    std::vector<Value> feedForward(const std::vector<T>& x) {
+        std::vector<Value> inputs;
+        inputs.reserve(x.size());
+        for (const auto& val : x) {
+            inputs.emplace_back(static_cast<double>(val));
+        }
+        return feedForward(inputs);
+    }
+
+    // Get all parameters for optimization
+    std::vector<std::reference_wrapper<Value>> getParameters() {
+        std::vector<std::reference_wrapper<Value>> params;
+        for (auto& layer : layers) {
+            auto layer_params = layer.getParameters();
+            params.insert(params.end(), layer_params.begin(), layer_params.end());
+        }
+        return params;
+    }
+
+    // Zero all gradients before backward pass
+    void zeroGrad() {
+        for (auto& param : getParameters()) {
+            param.get().grad = 0;
+        }
+    }
+
+    // Simple SGD optimizer step
+    void step(double learning_rate) {
+        for (auto& param : getParameters()) {
+            param.get().data += -learning_rate * param.get().grad;
+        }
+    }
+
+    // Getters
+    const std::vector<Layer>& getLayers() const { return layers; }
+    size_t getInputSize() const { return layers.front().getInputSize(); }
+    size_t getOutputSize() const { return layers.back().getOutputSize(); }
+};
 
 } // namespace NeuralNetwork
