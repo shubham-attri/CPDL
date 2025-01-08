@@ -1,0 +1,77 @@
+digraph ComputationalGraph {
+  rankdir=TB;
+  bgcolor="white";
+  node [style=filled, fontname="Arial"];
+  edge [color="#666666"];
+  subgraph cluster_layer_0 {
+    style=invis;
+    rank=same;
+    node_0x608000000e38 [label="{data: -0.7369|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x608000000eb8 [label="{data: 2.0000|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x608000000fb8 [label="{data: -1.0000|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x6080000010b8 [label="{data: -0.0827|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x608000001138 [label="{data: 2.0000|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x608000001238 [label="{data: 0.5112|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x608000001338 [label="{data: -0.5621|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x608000001438 [label="{data: -0.9059|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x6080000016b8 [label="{data: 0.0655|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+  }
+  subgraph cluster_layer_1 {
+    style=invis;
+    rank=same;
+    node_0x608000000f38 [label="{data: -1.4738|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x6080000011b8 [label="{data: -0.1654|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+  }
+  subgraph cluster_layer_2 {
+    style=invis;
+    rank=same;
+    node_0x608000001038 [label="{data: -2.4738|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x6080000012b8 [label="{data: 0.3458|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+  }
+  subgraph cluster_layer_3 {
+    style=invis;
+    rank=same;
+    node_0x6080000013b8 [label="{data: -0.9859|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x6080000014b8 [label="{data: 0.3327|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+  }
+  subgraph cluster_layer_4 {
+    style=invis;
+    rank=same;
+    node_0x608000001538 [label="{data: 0.5542|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+    node_0x6080000015b8 [label="{data: -0.3014|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+  }
+  subgraph cluster_layer_5 {
+    style=invis;
+    rank=same;
+    node_0x608000001638 [label="{data: 0.2528|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+  }
+  subgraph cluster_layer_6 {
+    style=invis;
+    rank=same;
+    node_0x608000001738 [label="{data: 0.3183|grad: 0.0000}", shape="record", fillcolor="#F8F8F8", penwidth=2];
+  }
+  subgraph cluster_layer_7 {
+    style=invis;
+    rank=same;
+    node_0x607000000410 [label="{data: 0.3080|grad: -7.3840}", shape="record", fillcolor="#FF6B6B", penwidth=2];
+  }
+  node_0x608000001738 -> node_0x607000000410 [label="grad: 0.0000"];
+  node_0x608000000e38 -> node_0x608000000f38 [label="grad: 0.0000"];
+  node_0x608000000eb8 -> node_0x608000000f38 [label="grad: 0.0000"];
+  node_0x608000000f38 -> node_0x608000001038 [label="grad: 0.0000"];
+  node_0x608000000fb8 -> node_0x608000001038 [label="grad: 0.0000"];
+  node_0x6080000010b8 -> node_0x6080000011b8 [label="grad: 0.0000"];
+  node_0x608000001138 -> node_0x6080000011b8 [label="grad: 0.0000"];
+  node_0x6080000011b8 -> node_0x6080000012b8 [label="grad: 0.0000"];
+  node_0x608000001238 -> node_0x6080000012b8 [label="grad: 0.0000"];
+  node_0x608000001038 -> node_0x6080000013b8 [label="grad: 0.0000"];
+  node_0x6080000012b8 -> node_0x6080000014b8 [label="grad: 0.0000"];
+  node_0x608000001338 -> node_0x608000001538 [label="grad: 0.0000"];
+  node_0x6080000013b8 -> node_0x608000001538 [label="grad: 0.0000"];
+  node_0x608000001438 -> node_0x6080000015b8 [label="grad: 0.0000"];
+  node_0x6080000014b8 -> node_0x6080000015b8 [label="grad: 0.0000"];
+  node_0x608000001538 -> node_0x608000001638 [label="grad: 0.0000"];
+  node_0x6080000015b8 -> node_0x608000001638 [label="grad: 0.0000"];
+  node_0x608000001638 -> node_0x608000001738 [label="grad: 0.0000"];
+  node_0x6080000016b8 -> node_0x608000001738 [label="grad: 0.0000"];
+}

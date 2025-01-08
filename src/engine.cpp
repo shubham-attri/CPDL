@@ -206,9 +206,9 @@ void visualizeNeuron() {
     // Print initial weights and bias
     std::cout << "Initial weights: [";
     for (const auto& w : weights) {
-        std::cout << w.getData() << " ";
+        std::cout << w->getData() << " ";
     }
-    std::cout << "], bias: " << bias.getData() << std::endl;
+    std::cout << "], bias: " << bias->getData() << std::endl;
     
     // Create input values
     std::vector<Value> inputs = {Value(1.0), Value(0.5)};
@@ -237,9 +237,9 @@ void visualizeNeuron() {
         }
         std::cout << "]\nWeight gradients: [";
         for (const auto& w : weights) {
-            std::cout << w.getGrad() << " ";
+            std::cout << w->getGrad() << " ";
         }
-        std::cout << "]\nBias gradient: " << bias.getGrad() << std::endl;
+        std::cout << "]\nBias gradient: " << bias->getGrad() << std::endl;
         
         // Generate DOT file after backward pass
         std::cout << "Generating backward pass graph..." << std::endl;
@@ -304,11 +304,15 @@ int main() {
     std::vector<double> y = {2, 4, 6};                     // Target values (2x)
 
     // Just 3 epochs to see the progression
-    int epochs = 3;
+    int epochs = 1;
     double learning_rate = 0.1;
 
     std::cout << "\nWatching the network learn y = 2x:" << std::endl;
     std::cout << "--------------------------------" << std::endl;
+
+    // Create a log file for parameters
+    std::ofstream param_log("parameter_changes.txt");
+    param_log << "Epoch,Parameter,Value,Gradient\n";  // Updated CSV header
 
     // Training loop
     for (int epoch = 0; epoch < epochs; epoch++) {
@@ -323,14 +327,62 @@ int main() {
                      << ", Prediction: " << std::fixed << std::setprecision(3) 
                      << pred[0].getData() << std::endl;
 
-            // Backward pass and update
+            // First zero the gradients from previous iteration
             mlp.zeroGrad();
-            pred[0].grad = 2.0 * (pred[0].getData() - target);
+            
+            // Compute loss and do backward pass
+            double loss = pred[0].getData() - target;
+            pred[0].grad = 2.0 * loss;  // MSE loss gradient
+            std::cout << "Loss: " << (loss * loss) << ", Initial gradient: " << pred[0].grad << std::endl;
+            
+            // Generate visualization before backward
+            std::stringstream ss;
+            ss << "mlp_training_e" << epoch << "_step" << i << "_before.dot";
+            generateDotFile(pred[0], ss.str());
+            
             pred[0].backward();
+            
+            // Generate visualization after backward
+            ss.str("");
+            ss << "mlp_training_e" << epoch << "_step" << i << "_after.dot";
+            generateDotFile(pred[0], ss.str());
+            
+            // Log parameters and gradients BEFORE the step
+            auto params = mlp.getParameters();
+            std::cout << "\nGradients for training step " << i << ":" << std::endl;
+            for (size_t j = 0; j < params.size(); j++) {
+                const auto& param = params[j].get();
+                param_log << epoch << "," << "param_" << j << "," 
+                         << std::fixed << std::setprecision(6) 
+                         << param.getData() << ","
+                         << param.getGrad() << "\n";
+                
+                std::cout << "Parameter " << j << ": value=" << param.getData() 
+                         << ", gradient=" << param.getGrad() << std::endl;
+            }
+            
+            // Update parameters
             mlp.step(learning_rate);
+            
+            // Print parameter values after update
+            std::cout << "\nParameters after update:" << std::endl;
+            for (size_t j = 0; j < params.size(); j++) {
+                const auto& param = params[j].get();
+                std::cout << "Parameter " << j << " new value: " << param.getData() << std::endl;
+            }
         }
     }
 
+    // Log final parameters
+    auto final_params = mlp.getParameters();
+    for (size_t i = 0; i < final_params.size(); i++) {
+        param_log << epochs << ",param_" << i << "," 
+                 << std::fixed << std::setprecision(6) 
+                 << final_params[i].get().getData() << ","
+                 << final_params[i].get().getGrad() << "\n";
+    }
+
+    param_log.close();
     return 0;
 }
 
