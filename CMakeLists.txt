@@ -12,6 +12,14 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment version")
 endif()
 
+# Add option for debug mode
+option(DEBUG_MODE "Enable debug mode with additional visualization" ON)
+
+# Add debug definition if enabled
+if(DEBUG_MODE)
+    add_definitions(-DDEBUG_MODE)
+endif()
+
 # Add source files
 add_executable(CPDL src/engine.cpp)
 
