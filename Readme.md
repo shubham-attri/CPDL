@@ -50,7 +50,4 @@ Running the program with the `visualizeValue()` function demonstrates a basic Va
    ```
    When built with DEBUG=ON, the program will generate visualization files for the computation graphs.
 
-### Debugging Classes
 
-#### Value Class
-Debug the Value class operations:
